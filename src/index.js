@@ -85,12 +85,11 @@ app.get('/health', (_req, res) => {
 app.use('/', breakfastRouter);
 
 // ── Startup ───────────────────────────────────────────────────────────────────
-const PORT = Number(process.env.PORT || 3000);
-app.listen(PORT, () => {
-  console.log(`[${ts()}] breakfast-backend listening on :${PORT}`);
-  console.log(`[${ts()}] [STARTUP] NODE_ENV=${process.env.NODE_ENV || 'undefined'}`);
-  console.log(`[${ts()}] [STARTUP] CORS=${allowedList ? allowedList.join(', ') : 'open (*)'}`);
-  if (IS_PROD && rawOrigins === '*') {
-    console.log(`[${ts()}] [WARNING] CORS is open to all origins — set ALLOWED_ORIGINS in production`);
-  }
-});
+if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
+  const PORT = Number(process.env.PORT || 3000);
+  app.listen(PORT, () => {
+    console.log(`breakfast-backend listening on :${PORT}`);
+  });
+}
+
+module.exports = app;
