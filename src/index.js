@@ -24,21 +24,12 @@ const app = express();
 app.use(helmet());
 
 // ── CORS (SEGURIDAD 4) ────────────────────────────────────────────────────────
-const allowedList = rawOrigins === '*' ? null : rawOrigins.split(',').map(o => o.trim());
-
-const corsOptions = {
-  origin: allowedList
-    ? (origin, cb) => {
-        // Allow requests with no Origin header (same-origin, curl, mobile apps)
-        if (!origin || allowedList.includes(origin)) return cb(null, true);
-        console.log(`[${ts()}] [SECURITY] Blocked CORS request from origin: ${origin}`);
-        cb(new Error('Not allowed by CORS'));
-      }
-    : '*',
+const allowedList = null;
+app.use(cors({
+  origin: '*',
   methods: ['GET', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-};
-app.use(cors(corsOptions));
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 app.use(express.json());
 

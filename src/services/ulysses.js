@@ -3,7 +3,7 @@ const { getBasicAuthHeader } = require('../utils/auth');
 const BASE_URL     = () => process.env.ULYSSES_BASE_URL;
 const CHAIN_ID     = () => process.env.ULYSSES_CHAIN_ID;
 const PROPERTY_ID  = () => process.env.ULYSSES_PROPERTY_ID;
-const TIMEOUT_MS   = 10_000;
+const TIMEOUT_MS   = 8_000;
 
 async function ulyssesGet(path) {
   const url        = `${BASE_URL()}${path}`;
