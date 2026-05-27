@@ -36,6 +36,13 @@ function calcStayNights(checkIn, checkOut) {
   return isNaN(diff) ? 0 : Math.max(0, Math.floor(diff));
 }
 
+function subtractOneDay(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return dt.toISOString().slice(0, 10);
+}
+
 // ── Board detection ───────────────────────────────────────────────────────────
 
 function boardFromText(text) {
@@ -101,9 +108,13 @@ function detectBreakfastStatus(stay, combinedRemarks) {
   const bookerText = JSON.stringify([stay.mainBooker, stay.mainCentral]).toUpperCase();
   if (/COMPLEMENTARY/.test(bookerText)) return 'complementary';
 
-  const { code: boardCode } = detectBoard(stay, combinedRemarks);
+  const { code: boardCode, serviceCodes } = detectBoard(stay, combinedRemarks);
   if (BREAKFAST_CODES.has(boardCode)) return 'included';
-  if (ROOM_ONLY_CODES.has(boardCode)) return 'upsell';
+  if (ROOM_ONLY_CODES.has(boardCode)) {
+    // upsell = room-only rate but has a breakfast service added (sold separately)
+    // none   = room-only with no breakfast service at all
+    return serviceCodes.some(c => /BRK|BRKF|BREAKFAST|DES/.test(c)) ? 'upsell' : 'none';
+  }
   return 'none';
 }
 
@@ -165,7 +176,7 @@ function extractReservationList(payload) {
 
 // ── Group reservations → room rows ────────────────────────────────────────────
 
-function groupByRoom(reservations, date) {
+function groupByRoom(reservations, date, yesterday) {
   // roomNumber → room object (insertion order = first-seen order, sorted at end)
   const roomMap = new Map();
   const detection = { byRemarks: 0, byMainBoard: 0, byDailyBoard: 0, byService: 0, undetected: 0 };
@@ -226,9 +237,10 @@ function groupByRoom(reservations, date) {
       const breakfastStatus = detectBreakfastStatus(stay, remarks);
       const hasBreakfast    = BREAKFAST_CODES.has(boardCode); // kept for backward compat
 
-      const checkIn       = stay.arrival   || stay.checkIn  || '';
-      const checkOut      = stay.departure || stay.checkOut || '';
-      const checkoutToday = stay.departure === date || stay.checkOut === date;
+      const checkIn        = stay.arrival   || stay.checkIn  || '';
+      const checkOut       = stay.departure || stay.checkOut || '';
+      const checkoutToday  = stay.departure === date || stay.checkOut === date;
+      const firstBreakfast = !!yesterday && checkIn === yesterday;
 
       if (roomMap.has(roomNumber)) {
         // Merge into existing room: add guests, sum PAX, combine remarks
@@ -255,6 +267,7 @@ function groupByRoom(reservations, date) {
           boardCode,
           statusCode,
           checkoutToday,
+          firstBreakfast,
           vipLevel,
           reservationId:   String(reservation.id || ''),
           remarks,
@@ -308,20 +321,28 @@ function upstreamError(res, err) {
 // ── Shared fetch + merge helper ───────────────────────────────────────────────
 
 async function fetchAndMergeReservations(date) {
-  // getInHouseReservations and getDepartingReservations now return flat arrays
-  // (paginated — each page capped at 100 by Ulysses)
+  // date   = today (breakfast date, passed by the frontend)
+  // yesterday = date - 1 day
+  //
+  // stayFrom=yesterday&stayTo=yesterday → guests who slept last night (come down for breakfast)
+  // departureFrom=date&departureTo=date → guests checking out today (also had breakfast)
+  const yesterday = subtractOneDay(date);
+
   const [forecast, inHouseList, departingList] = await Promise.all([
     getBoardForecast(date),
-    getInHouseReservations(date),
+    getInHouseReservations(yesterday),
     getDepartingReservations(date),
   ]);
 
   const seenIds    = new Set(inHouseList.map(r => r.id));
   const mergedList = [...inHouseList, ...departingList.filter(r => !seenIds.has(r.id))];
 
-  console.log(`[${ts()}] [merge] inHouse=${inHouseList.length} departing=${departingList.length} merged=${mergedList.length}`);
+  console.log(
+    `[${ts()}] [merge] date=${date} yesterday=${yesterday}` +
+    ` inHouse=${inHouseList.length} departing=${departingList.length} merged=${mergedList.length}`
+  );
 
-  return { forecast, mergedList };
+  return { forecast, mergedList, yesterday };
 }
 
 // ── GET /breakfast-list ───────────────────────────────────────────────────────
@@ -340,9 +361,9 @@ router.get('/breakfast-list', async (req, res) => {
   const t0 = Date.now();
 
   try {
-    const { forecast, mergedList } = await fetchAndMergeReservations(date);
-    const totals                   = pickTotals(forecast, date);
-    const { rooms, detection }     = groupByRoom(mergedList, date);
+    const { forecast, mergedList, yesterday } = await fetchAndMergeReservations(date);
+    const totals                              = pickTotals(forecast, date);
+    const { rooms, detection }                = groupByRoom(mergedList, date, yesterday);
 
     const withBreakfast    = rooms.filter(r => r.hasBreakfast).length;
     const withoutBreakfast = rooms.length - withBreakfast;
@@ -381,9 +402,9 @@ router.get('/debug/breakfast', async (req, res) => {
   if (dateErr) return res.status(400).json({ error: dateErr });
 
   try {
-    const { forecast, mergedList } = await fetchAndMergeReservations(date);
+    const { forecast, mergedList, yesterday } = await fetchAndMergeReservations(date);
     const totals               = pickTotals(forecast, date);
-    const { rooms, detection } = groupByRoom(mergedList, date);
+    const { rooms, detection } = groupByRoom(mergedList, date, yesterday);
 
     const withBreakfast    = rooms.filter(r => r.hasBreakfast);
     const withoutBreakfast = rooms.filter(r => !r.hasBreakfast);
