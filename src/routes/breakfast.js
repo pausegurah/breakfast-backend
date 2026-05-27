@@ -44,7 +44,10 @@ function boardFromText(text) {
   if (/\bAI\b|ALL[\s-]?INCLUSIVE/.test(t))               return 'AI';
   if (/\bFB\b|FULL[\s-]?BOARD|PENS[IÓ]N\s+COMPLETA/.test(t)) return 'FB';
   if (/\bHB\b|HALF[\s-]?BOARD|MEDIA\s+PENS[IÓ]N/.test(t))    return 'HB';
-  if (/\bBB\b|B&B|BREAKFAST|DESAYUNO/.test(t))           return 'BB';
+  // Match BB/BREAKFAST/DESAYUNO only when NOT preceded by a negation word.
+  // Prevents "SIN DESAYUNO" or "NO BB" from being misclassified as breakfast-included.
+  if (/\bBB\b|B&B|BREAKFAST|DESAYUNO/.test(t) &&
+      !/\b(?:SIN|NO|NOT|WITHOUT|OHNE|SANS)\s+(?:BB|BREAKFAST|DESAYUNO)/.test(t)) return 'BB';
   return null;
 }
 
@@ -301,16 +304,18 @@ function upstreamError(res, err) {
 // ── Shared fetch + merge helper ───────────────────────────────────────────────
 
 async function fetchAndMergeReservations(date) {
-  const [forecast, reservationsRaw, departingRaw] = await Promise.all([
+  // getInHouseReservations and getDepartingReservations now return flat arrays
+  // (paginated — each page capped at 100 by Ulysses)
+  const [forecast, inHouseList, departingList] = await Promise.all([
     getBoardForecast(date),
     getInHouseReservations(date),
     getDepartingReservations(date),
   ]);
 
-  const inHouseList   = Array.isArray(reservationsRaw?.list) ? reservationsRaw.list : extractReservationList(reservationsRaw);
-  const departingList = Array.isArray(departingRaw?.list)    ? departingRaw.list    : extractReservationList(departingRaw);
-  const seenIds       = new Set(inHouseList.map(r => r.id));
-  const mergedList    = [...inHouseList, ...departingList.filter(r => !seenIds.has(r.id))];
+  const seenIds    = new Set(inHouseList.map(r => r.id));
+  const mergedList = [...inHouseList, ...departingList.filter(r => !seenIds.has(r.id))];
+
+  console.log(`[${ts()}] [merge] inHouse=${inHouseList.length} departing=${departingList.length} merged=${mergedList.length}`);
 
   return { forecast, mergedList };
 }
