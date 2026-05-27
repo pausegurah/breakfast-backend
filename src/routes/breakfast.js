@@ -197,8 +197,10 @@ function groupByRoom(reservations, date, yesterday) {
       ? reservation.reservationRoomStayList : [];
 
     for (const stay of stays) {
-      const statusCode     = String(stay?.reservationStatusType?.code ?? '').toUpperCase();
-      const isActive       = ACTIVE_STATUSES.has(statusCode);
+      const statusCode = String(stay?.reservationStatusType?.code ?? '').toUpperCase();
+      // CAN = cancelled, CO = physically checked out — never show regardless of departure date
+      if (statusCode === 'CAN' || statusCode === 'CO') continue;
+      const isActive         = ACTIVE_STATUSES.has(statusCode);
       const isDepartingToday = (stay.departure === date || stay.checkOut === date);
       if (!isActive && !isDepartingToday) continue;
 
