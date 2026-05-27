@@ -44,10 +44,11 @@ function boardFromText(text) {
   if (/\bAI\b|ALL[\s-]?INCLUSIVE/.test(t))               return 'AI';
   if (/\bFB\b|FULL[\s-]?BOARD|PENS[IÓ]N\s+COMPLETA/.test(t)) return 'FB';
   if (/\bHB\b|HALF[\s-]?BOARD|MEDIA\s+PENS[IÓ]N/.test(t))    return 'HB';
-  // Match BB/BREAKFAST/DESAYUNO only when NOT preceded by a negation word.
-  // Prevents "SIN DESAYUNO" or "NO BB" from being misclassified as breakfast-included.
-  if (/\bBB\b|B&B|BREAKFAST|DESAYUNO/.test(t) &&
-      !/\b(?:SIN|NO|NOT|WITHOUT|OHNE|SANS)\s+(?:BB|BREAKFAST|DESAYUNO)/.test(t)) return 'BB';
+  // Only match explicit board codes BB / B&B — never free-text BREAKFAST/DESAYUNO
+  // because those words appear in service requests ("DESAYUNO EN HABITACIÓN",
+  // "BREAKFAST NOT INCLUDED") and produce false positives regardless of negation order.
+  if (/\bBB\b|B&B/.test(t) &&
+      !/\b(?:SIN|NO|NOT|WITHOUT|OHNE|SANS)\s+BB/.test(t)) return 'BB';
   return null;
 }
 
@@ -66,8 +67,11 @@ function detectBoard(stay, combinedRemarks) {
   const fromText = boardFromText(combinedRemarks);
   if (fromText) return { code: fromText, method: 'remarks', mainBoardCode, dailyBoardCode, serviceCodes };
 
-  // Cascade 2: mainBoard field
-  if (mainBoardCode && mainBoardCode !== 'RO') {
+  // Cascade 2: mainBoard field — only trust it when the code is a recognised value.
+  // Unknown codes (e.g. PMS defaults, free-text typos) fall through to the more
+  // reliable dailyBoard instead of short-circuiting with a wrong result.
+  const KNOWN_BOARD_CODES = new Set([...BREAKFAST_CODES, ...ROOM_ONLY_CODES]);
+  if (mainBoardCode && mainBoardCode !== 'RO' && KNOWN_BOARD_CODES.has(mainBoardCode)) {
     return { code: mainBoardCode, method: 'mainBoard', mainBoardCode, dailyBoardCode, serviceCodes };
   }
 
